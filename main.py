@@ -235,6 +235,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("gemini")
 
+# ---------- Linux zombie process reaper ----------
+# DrissionPage / Chromium may spawn subprocesses that exit without being waited on,
+# which can accumulate as zombies (<defunct>) in long-running services.
+try:
+    from core.child_reaper import install_child_reaper
+
+    install_child_reaper(log=lambda m: logger.warning(m))
+except Exception:
+    # Never fail startup due to optional process reaper.
+    pass
+
 # 添加内存日志处理器
 memory_handler = MemoryLogHandler()
 memory_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S"))
@@ -1038,6 +1049,19 @@ async def admin_start_register(request: Request, count: Optional[int] = Body(def
     task = await register_service.start_register(count=count, domain=domain)
     return task.to_dict()
 
+
+@app.post("/admin/register/cancel/{task_id}")
+@require_login()
+async def admin_cancel_register_task(request: Request, task_id: str, payload: dict = Body(default=None)):
+    if not register_service:
+        raise HTTPException(503, "register service unavailable")
+    payload = payload or {}
+    reason = payload.get("reason") or "cancelled"
+    task = await register_service.cancel_task(task_id, reason=reason)
+    if not task:
+        raise HTTPException(404, "task not found")
+    return task.to_dict()
+
 @app.get("/admin/register/task/{task_id}")
 @require_login()
 async def admin_get_register_task(request: Request, task_id: str):
@@ -1066,6 +1090,19 @@ async def admin_start_login(request: Request, account_ids: List[str] = Body(...)
     task = await login_service.start_login(account_ids)
     return task.to_dict()
 
+
+@app.post("/admin/login/cancel/{task_id}")
+@require_login()
+async def admin_cancel_login_task(request: Request, task_id: str, payload: dict = Body(default=None)):
+    if not login_service:
+        raise HTTPException(503, "login service unavailable")
+    payload = payload or {}
+    reason = payload.get("reason") or "cancelled"
+    task = await login_service.cancel_task(task_id, reason=reason)
+    if not task:
+        raise HTTPException(404, "task not found")
+    return task.to_dict()
+
 @app.get("/admin/login/task/{task_id}")
 @require_login()
 async def admin_get_login_task(request: Request, task_id: str):
@@ -1091,8 +1128,10 @@ async def admin_get_current_login_task(request: Request):
 async def admin_check_login_refresh(request: Request):
     if not login_service:
         raise HTTPException(503, "login service unavailable")
-    await login_service.check_and_refresh()
-    return {"status": "ok"}
+    task = await login_service.check_and_refresh()
+    if not task:
+        return {"status": "idle"}
+    return task.to_dict()
 
 @app.delete("/admin/accounts/{account_id}")
 @require_login()
