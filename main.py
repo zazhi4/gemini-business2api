@@ -1369,6 +1369,9 @@ async def admin_get_settings(request: Request):
             "freemail_verify_ssl": config.basic.freemail_verify_ssl,
             "freemail_domain": config.basic.freemail_domain,
             "mail_proxy_enabled": config.basic.mail_proxy_enabled,
+            "gptmail_base_url": config.basic.gptmail_base_url,
+            "gptmail_api_key": config.basic.gptmail_api_key,
+            "gptmail_verify_ssl": config.basic.gptmail_verify_ssl,
             "browser_engine": config.basic.browser_engine,
             "browser_headless": config.basic.browser_headless,
             "refresh_window_hours": config.basic.refresh_window_hours,
@@ -1425,6 +1428,9 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         basic.setdefault("freemail_verify_ssl", config.basic.freemail_verify_ssl)
         basic.setdefault("freemail_domain", config.basic.freemail_domain)
         basic.setdefault("mail_proxy_enabled", config.basic.mail_proxy_enabled)
+        basic.setdefault("gptmail_base_url", config.basic.gptmail_base_url)
+        basic.setdefault("gptmail_api_key", config.basic.gptmail_api_key)
+        basic.setdefault("gptmail_verify_ssl", config.basic.gptmail_verify_ssl)
         basic.setdefault("browser_engine", config.basic.browser_engine)
         basic.setdefault("browser_headless", config.basic.browser_headless)
         basic.setdefault("refresh_window_hours", config.basic.refresh_window_hours)

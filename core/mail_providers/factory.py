@@ -3,6 +3,7 @@ from typing import Callable, Optional
 from core.config import config
 from core.duckmail_client import DuckMailClient
 from core.freemail_client import FreemailClient
+from core.gptmail_client import GPTMailClient
 from core.moemail_client import MoemailClient
 
 
@@ -30,6 +31,14 @@ def create_temp_mail_client(
             jwt_token=config.basic.freemail_jwt_token,
             proxy=proxy,
             verify_ssl=config.basic.freemail_verify_ssl,
+            log_callback=log_cb,
+        )
+    if provider == "gptmail":
+        return GPTMailClient(
+            base_url=config.basic.gptmail_base_url,
+            api_key=config.basic.gptmail_api_key,
+            proxy=proxy,
+            verify_ssl=config.basic.gptmail_verify_ssl,
             log_callback=log_cb,
         )
 

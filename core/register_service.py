@@ -201,6 +201,10 @@ class RegisterService(BaseTaskService[RegisterTask]):
         config_data["mail_address"] = client.email
         if temp_mail_provider == "freemail":
             config_data["mail_password"] = ""
+            config_data["mail_base_url"] = config.basic.freemail_base_url
+        elif temp_mail_provider == "gptmail":
+            config_data["mail_password"] = ""
+            config_data["mail_base_url"] = config.basic.gptmail_base_url
         elif temp_mail_provider == "moemail":
             config_data["mail_password"] = getattr(client, "email_id", "") or getattr(client, "password", "")
         else:

@@ -175,6 +175,27 @@
                   />
                 </template>
 
+                <!-- GPTMail 配置 -->
+                <template v-if="localSettings.basic.temp_mail_provider === 'gptmail'">
+                  <Checkbox v-model="localSettings.basic.gptmail_verify_ssl">
+                    GPTMail SSL 校验
+                  </Checkbox>
+                  <label class="block text-xs text-muted-foreground">GPTMail API</label>
+                  <input
+                    v-model="localSettings.basic.gptmail_base_url"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="https://mail.chatgpt.org.uk"
+                  />
+                  <label class="block text-xs text-muted-foreground">GPTMail API Key</label>
+                  <input
+                    v-model="localSettings.basic.gptmail_api_key"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="X-API-Key"
+                  />
+                </template>
+
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>过期刷新窗口（小时）</span>
                   <HelpTip text="当账号距离过期小于等于该值时，会触发自动登录刷新（更新 cookie/session）。" />
@@ -425,6 +446,11 @@ watch(settings, (value) => {
     ? next.basic.freemail_domain
     : ''
   next.basic.mail_proxy_enabled = next.basic.mail_proxy_enabled ?? false
+    next.basic.gptmail_base_url = next.basic.gptmail_base_url || 'https://mail.chatgpt.org.uk'
+    next.basic.gptmail_api_key = typeof next.basic.gptmail_api_key === 'string'
+      ? next.basic.gptmail_api_key
+      : ''
+    next.basic.gptmail_verify_ssl = next.basic.gptmail_verify_ssl ?? true
   next.retry = next.retry || {}
   next.retry.auto_refresh_accounts_seconds = Number.isFinite(next.retry.auto_refresh_accounts_seconds)
     ? next.retry.auto_refresh_accounts_seconds

@@ -66,7 +66,7 @@ export interface Stats {
   requests_per_hour: number
 }
 
-export type TempMailProvider = 'duckmail' | 'moemail' | 'freemail'
+export type TempMailProvider = 'duckmail' | 'moemail' | 'freemail' | 'gptmail'
 
 export interface Settings {
   basic: {
@@ -86,6 +86,9 @@ export interface Settings {
     freemail_verify_ssl?: boolean
     freemail_domain?: string
     mail_proxy_enabled?: boolean
+    gptmail_base_url?: string
+    gptmail_api_key?: string
+    gptmail_verify_ssl?: boolean
     browser_engine?: string
     browser_headless?: boolean
     refresh_window_hours?: number
