@@ -3,6 +3,7 @@
 export interface QuotaStatus {
   available: boolean
   remaining_seconds?: number
+  reason?: string  // 受限原因（如"对话配额受限"）
 }
 
 export interface AccountQuotaStatus {
@@ -24,6 +25,7 @@ export interface AdminAccount {
   remaining_display: string
   is_available: boolean
   error_count: number
+  failure_count: number
   disabled: boolean
   cooldown_seconds: number
   cooldown_reason: string | null
@@ -100,9 +102,13 @@ export interface Settings {
     max_request_retries: number
     max_account_switch_tries: number
     account_failure_threshold: number
-    rate_limit_cooldown_seconds: number
+    text_rate_limit_cooldown_seconds: number
+    images_rate_limit_cooldown_seconds: number
+    videos_rate_limit_cooldown_seconds: number
     session_cache_ttl_seconds: number
     auto_refresh_accounts_seconds: number
+    scheduled_refresh_enabled?: boolean
+    scheduled_refresh_interval_minutes?: number
   }
   public_display: {
     logo_url?: string
@@ -181,6 +187,8 @@ export interface AdminStatsTrend {
   failed_requests: number[]
   rate_limited_requests: number[]
   model_requests?: Record<string, number[]>
+  model_ttfb_times?: Record<string, number[]>
+  model_total_times?: Record<string, number[]>
 }
 
 export interface AdminStats {
@@ -189,6 +197,8 @@ export interface AdminStats {
   failed_accounts: number
   rate_limited_accounts: number
   idle_accounts: number
+  success_count?: number
+  failed_count?: number
   trend: AdminStatsTrend
 }
 
