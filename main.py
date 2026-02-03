@@ -2144,8 +2144,7 @@ async def chat_impl(
                     # 空响应应该触发重试逻辑
                     raise HTTPException(status_code=502, detail="Empty response from upstream")
 
-                # 请求成功
-                account_manager.conversation_count += 1
+                # 请求成功（conversation_count 已在生成器内统计）
                 uptime_tracker.record_request("account_pool", True)
                 await finalize_result("success", 200, None)
                 break
@@ -2490,6 +2489,8 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                             first_response_time = time.time()
                             if request is not None:
                                 request.state.first_response_time = first_response_time
+                            # 第一次响应时统计成功次数
+                            account_manager.conversation_count += 1
                         # 正常内容使用 content 字段
                         full_content += text
                         chunk = create_chunk(chat_id, created_time, model_name, {"content": text}, None)
