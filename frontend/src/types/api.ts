@@ -31,6 +31,8 @@ export interface AdminAccount {
   cooldown_reason: string | null
   conversation_count: number
   quota_status: AccountQuotaStatus
+  trial_end?: string | null
+  trial_days_remaining?: number | null
 }
 
 export interface AccountsListResponse {
@@ -91,6 +93,7 @@ export interface Settings {
     gptmail_base_url?: string
     gptmail_api_key?: string
     gptmail_verify_ssl?: boolean
+    gptmail_domain?: string
     browser_engine?: string
     browser_headless?: boolean
     refresh_window_hours?: number
@@ -98,8 +101,6 @@ export interface Settings {
     register_domain?: string
   }
   retry: {
-    max_new_session_tries: number
-    max_request_retries: number
     max_account_switch_tries: number
     account_failure_threshold: number
     text_rate_limit_cooldown_seconds: number

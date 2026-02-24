@@ -64,39 +64,12 @@
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                   placeholder="http://127.0.0.1:7890 | no_proxy=localhost,127.0.0.1"
                 />
-                <div class="rounded-2xl border border-border/60 bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
-                  <p class="mb-2 font-medium">格式示例：</p>
-                  <div class="space-y-1.5">
-                    <div>
-                      <p class="text-[10px] text-muted-foreground/70 mb-0.5">基础格式：</p>
-                      <p class="font-mono text-[11px] leading-relaxed">http://127.0.0.1:7890</p>
-                    </div>
-                    <div>
-                      <p class="text-[10px] text-muted-foreground/70 mb-0.5">带认证：</p>
-                      <p class="font-mono text-[11px] leading-relaxed">http://user:pass@127.0.0.1:7890</p>
-                    </div>
-                    <div>
-                      <p class="text-[10px] text-muted-foreground/70 mb-0.5">SOCKS5 + NO_PROXY：</p>
-                      <p class="font-mono text-[11px] leading-relaxed break-all">socks5h://127.0.0.1:7890 | no_proxy=localhost,127.0.0.1,.local</p>
-                    </div>
-                    <div>
-                      <p class="text-[10px] text-muted-foreground/70 mb-0.5">完整示例：</p>
-                      <p class="font-mono text-[11px] leading-relaxed break-all">socks5h://user:pass@127.0.0.1:7890 | no_proxy=localhost,127.0.0.1,.local</p>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
 
             <div class="rounded-2xl border border-border bg-card p-4">
               <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">重试</p>
               <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
-                <label class="col-span-2 text-xs text-muted-foreground">新会话尝试次数</label>
-                <input v-model.number="localSettings.retry.max_new_session_tries" type="number" min="1" class="col-span-2 rounded-2xl border border-input bg-background px-3 py-2" />
-
-                <label class="col-span-2 text-xs text-muted-foreground">请求重试次数</label>
-                <input v-model.number="localSettings.retry.max_request_retries" type="number" min="0" class="col-span-2 rounded-2xl border border-input bg-background px-3 py-2" />
-
                 <label class="col-span-2 text-xs text-muted-foreground">账户切换次数</label>
                 <input v-model.number="localSettings.retry.max_account_switch_tries" type="number" min="1" class="col-span-2 rounded-2xl border border-input bg-background px-3 py-2" />
 
@@ -258,7 +231,7 @@
                     class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                     placeholder="X-API-Key"
                   />
-                  <label class="block text-xs text-muted-foreground">GPTMail 邮箱域名（可选）</label>
+                  <label class="block text-xs text-muted-foreground">GPTMail 邮箱域名（可选，不带@）</label>
                   <input
                     v-model="localSettings.basic.gptmail_domain"
                     type="text"
@@ -420,8 +393,7 @@ const videosRateLimitCooldownHours = createCooldownHours(
 )
 
 const browserEngineOptions = [
-  { label: 'UC - 支持无头/有头', value: 'uc' },
-  { label: 'DP - 支持无头/有头（推荐）', value: 'dp' },
+  { label: 'DP - 支持无头/有头', value: 'dp' },
 ]
 const tempMailProviderOptions = mailProviderOptions
 const imageOutputOptions = [
@@ -436,6 +408,7 @@ const videoOutputOptions = [
 const imageModelOptions = computed(() => {
   const baseOptions = [
     { label: 'Gemini 3 Pro Preview', value: 'gemini-3-pro-preview' },
+    { label: 'Gemini 3.1 Pro Preview', value: 'gemini-3.1-pro-preview' },
     { label: 'Gemini 3 Flash Preview', value: 'gemini-3-flash-preview' },
     { label: 'Gemini 2.5 Pro', value: 'gemini-2.5-pro' },
     { label: 'Gemini 2.5 Flash', value: 'gemini-2.5-flash' },
