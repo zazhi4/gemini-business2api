@@ -218,7 +218,7 @@ class RegisterService(BaseTaskService[RegisterTask]):
 
         try:
             log_cb("info", "🔐 步骤 3/3: 执行 Gemini 自动登录...")
-            result = automation.login_and_extract(client.email, client)
+            result = automation.login_and_extract(client.email, client, is_new_account=True)
         except Exception as exc:
             log_cb("error", f"❌ 自动登录异常: {exc}")
             return {"success": False, "error": str(exc)}
