@@ -164,6 +164,7 @@ class AccountManager:
         self.conversation_count = 0  # 累计成功次数（用于统计展示）
         self.failure_count = 0  # 累计失败次数（用于统计展示）
         self.session_usage_count = 0  # 本次启动后使用次数（用于均衡轮询）
+        self.disabled_reason: Optional[str] = None  # 自动禁用原因（如 "403 Access Restricted"）
 
     def handle_non_http_error(self, error_context: str = "", request_id: str = "", quota_type: Optional[str] = None) -> None:
         """
@@ -250,14 +251,25 @@ class AccountManager:
             )
             return
 
-        # 401/403认证错误：冷却 text 配额（等效冷却整个账户，但可自动恢复）
-        if status_code in (401, 403):
+        # 403权限错误：Google 返回 403 意味着账户被限制访问，自动禁用
+        # （JWT 刷新或 API 调用返回 403 都是永久性封禁，非临时问题）
+        if status_code == 403:
+            self.config.disabled = True
+            self.disabled_reason = "403 Access Restricted"
+            logger.error(
+                f"[ACCOUNT] [{self.config.account_id}] {req_tag}"
+                f"⛔ 账户遇到 403 权限错误，已自动禁用"
+                f"{': ' + error_detail[:200] if error_detail else ''}"
+            )
+            return
+
+        # 401认证错误：冷却 text 配额（等效冷却整个账户，但可自动恢复）
+        if status_code == 401:
             self.quota_cooldowns["text"] = time.time()
             cooldown_seconds = self.text_rate_limit_cooldown_seconds
-            error_type = HTTP_ERROR_NAMES.get(status_code, f"HTTP {status_code}")
             logger.warning(
                 f"[ACCOUNT] [{self.config.account_id}] {req_tag}"
-                f"遇到{error_type}认证错误，账户将休息{cooldown_seconds}秒后自动恢复"
+                f"遇到认证错误，账户将休息{cooldown_seconds}秒后自动恢复"
                 f"{': ' + error_detail[:100] if error_detail else ''}"
             )
             return
@@ -869,12 +881,29 @@ def reload_accounts(
             account_mgr = new_mgr.accounts[account_id]
             account_mgr.conversation_count = stats["conversation_count"]
             account_mgr.failure_count = stats.get("failure_count", 0)
-            account_mgr.is_available = stats.get("is_available", True)
             account_mgr.last_error_time = stats.get("last_error_time", 0.0)
             account_mgr.session_usage_count = stats.get("session_usage_count", 0)
-            account_mgr.quota_cooldowns = stats.get("quota_cooldowns", {})
             account_mgr.daily_usage = stats.get("daily_usage", {"text": 0, "images": 0, "videos": 0})
             account_mgr.daily_usage_date = stats.get("daily_usage_date", "")
+
+            # Smart restore: consider new config's expired/disabled state
+            old_available = stats.get("is_available", True)
+            old_cooldowns = stats.get("quota_cooldowns", {})
+            if account_mgr.config.is_expired() or account_mgr.config.disabled:
+                # Still expired/disabled → preserve old state
+                account_mgr.is_available = False
+                account_mgr.quota_cooldowns = old_cooldowns
+            elif not old_available and not old_cooldowns:
+                # Was unavailable with no cooldowns (i.e. expired/disabled),
+                # now recovered → mark available and clear cooldowns
+                account_mgr.is_available = True
+                account_mgr.quota_cooldowns = {}
+                logger.info(f"[CONFIG] Account {account_id} recovered from expired state, cooldowns cleared")
+            else:
+                # Normal case: preserve runtime state (e.g. quota cooldowns)
+                account_mgr.is_available = old_available
+                account_mgr.quota_cooldowns = old_cooldowns
+
             logger.debug(f"[CONFIG] Account {account_id} refreshed; runtime state preserved")
 
     logger.info(
@@ -1089,15 +1118,17 @@ async def save_account_cooldown_state(account_id: str, account_mgr: AccountManag
         return False
 
     try:
-        cooldown_data = {
-            "quota_cooldowns": dict(account_mgr.quota_cooldowns),
-            "conversation_count": account_mgr.conversation_count,
-            "failure_count": account_mgr.failure_count,
-            "daily_usage": dict(account_mgr.daily_usage),
-            "daily_usage_date": account_mgr.daily_usage_date,
-        }
-
-        success = await storage.update_account_cooldown(account_id, cooldown_data)
+        success = await asyncio.to_thread(
+            storage.update_account_cooldown_sync,
+            account_id,
+            {
+                "quota_cooldowns": dict(account_mgr.quota_cooldowns),
+                "conversation_count": account_mgr.conversation_count,
+                "failure_count": account_mgr.failure_count,
+                "daily_usage": dict(account_mgr.daily_usage),
+                "daily_usage_date": account_mgr.daily_usage_date,
+            },
+        )
         if success:
             logger.debug(f"[COOLDOWN] 账户 {account_id} 冷却状态已保存")
         else:
@@ -1110,8 +1141,25 @@ async def save_account_cooldown_state(account_id: str, account_mgr: AccountManag
 
 def save_account_cooldown_state_sync(account_id: str, account_mgr: AccountManager) -> bool:
     """保存单个账户的冷却状态到数据库（同步版本）"""
+    if not storage.is_database_enabled():
+        return False
+
     try:
-        return asyncio.run(save_account_cooldown_state(account_id, account_mgr))
+        success = storage.update_account_cooldown_sync(
+            account_id,
+            {
+                "quota_cooldowns": dict(account_mgr.quota_cooldowns),
+                "conversation_count": account_mgr.conversation_count,
+                "failure_count": account_mgr.failure_count,
+                "daily_usage": dict(account_mgr.daily_usage),
+                "daily_usage_date": account_mgr.daily_usage_date,
+            },
+        )
+        if success:
+            logger.debug(f"[COOLDOWN] 账户 {account_id} 冷却状态已保存（同步）")
+        else:
+            logger.warning(f"[COOLDOWN] 账户 {account_id} 不存在（同步）")
+        return success
     except Exception as e:
         logger.error(f"[COOLDOWN] 同步保存账户 {account_id} 冷却状态失败: {e}")
         return False
@@ -1146,7 +1194,10 @@ async def save_all_cooldown_states(multi_account_mgr: MultiAccountManager) -> in
         logger.info(f"[COOLDOWN] 无需保存：所有账户无冷却状态")
         return 0
 
-    success_count, missing = await storage.bulk_update_accounts_cooldown(updates)
+    success_count, missing = await asyncio.to_thread(
+        storage.bulk_update_accounts_cooldown_sync,
+        updates,
+    )
 
     if missing:
         logger.warning(f"[COOLDOWN] {len(missing)} 个账户不存在: {missing[:5]}")

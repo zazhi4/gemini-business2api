@@ -29,6 +29,7 @@ export interface AdminAccount {
   error_count: number
   failure_count: number
   disabled: boolean
+  disabled_reason: string | null
   cooldown_seconds: number
   cooldown_reason: string | null
   conversation_count: number
@@ -55,6 +56,11 @@ export interface AccountConfigItem {
   mail_client_id?: string
   mail_refresh_token?: string
   mail_tenant?: string
+  mail_base_url?: string
+  mail_api_key?: string
+  mail_jwt_token?: string
+  mail_verify_ssl?: boolean
+  mail_domain?: string
 }
 
 export interface AccountsConfigResponse {
@@ -72,7 +78,7 @@ export interface Stats {
   requests_per_hour: number
 }
 
-export type TempMailProvider = 'duckmail' | 'moemail' | 'freemail' | 'gptmail'
+export type TempMailProvider = 'duckmail' | 'moemail' | 'freemail' | 'gptmail' | 'cfmail' | 'samplemail'
 
 export interface Settings {
   basic: {
@@ -96,11 +102,19 @@ export interface Settings {
     gptmail_api_key?: string
     gptmail_verify_ssl?: boolean
     gptmail_domain?: string
+    cfmail_base_url?: string
+    cfmail_api_key?: string
+    cfmail_verify_ssl?: boolean
+    cfmail_domain?: string
+    samplemail_base_url?: string
+    samplemail_verify_ssl?: boolean
     browser_engine?: string
+    browser_mode?: 'normal' | 'silent' | 'headless'
     browser_headless?: boolean
     refresh_window_hours?: number
     register_default_count?: number
     register_domain?: string
+    image_expire_hours?: number
   }
   retry: {
     max_account_switch_tries: number
@@ -113,9 +127,8 @@ export interface Settings {
     scheduled_refresh_enabled?: boolean
     scheduled_refresh_interval_minutes?: number
     scheduled_refresh_cron?: string
-    refresh_batch_size?: number
-    refresh_batch_interval_minutes?: number
     refresh_cooldown_hours?: number
+    verification_code_resend_count?: number
   }
   public_display: {
     logo_url?: string
@@ -141,6 +154,38 @@ export interface LogEntry {
   time: string
   level: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'DEBUG'
   message: string
+  row_id?: string
+  tags?: string[]
+  account_id?: string
+  text?: string
+  req_id?: string
+  layer?: string
+  lane?: string
+  model?: string
+  kind?: string
+  stage?: string
+  served_label?: string
+}
+
+export interface AdminLogGroup {
+  id?: string
+  request_id?: string
+  status?: string
+  account_id?: string
+  model?: string
+  lane?: string
+  terminal_kind?: string
+  started_at?: string
+  ended_at?: string
+  user_preview?: string
+  assistant_preview?: string
+  row_ids?: string[]
+  events?: Array<{
+    time?: string
+    type?: string
+    status?: string
+    content?: string
+  }>
 }
 
 export interface LogsResponse {
@@ -170,6 +215,7 @@ export interface AdminLogsResponse extends LogsResponse {
     end_time?: string | null
   }
   stats: AdminLogStats
+  groups?: AdminLogGroup[]
 }
 
 export type PublicLogStatus = 'success' | 'error' | 'timeout' | 'in_progress'
@@ -257,6 +303,22 @@ export interface LoginRequest {
 export interface LoginResponse {
   success: boolean
   message?: string
+}
+
+export interface VersionInfoResponse {
+  version: string
+  tag: string
+  commit: string
+}
+
+export interface VersionCheckResponse extends VersionInfoResponse {
+  repository: string
+  latest_tag: string
+  latest_version: string
+  release_url: string
+  is_latest: boolean
+  update_available: boolean
+  check_error?: string
 }
 
 export type AutomationStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled'

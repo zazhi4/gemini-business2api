@@ -40,6 +40,14 @@ def _parse_bool(value, default: bool) -> bool:
     return default
 
 
+def _normalize_browser_mode(value, default: str = "normal") -> str:
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("normal", "silent", "headless"):
+            return lowered
+    return default
+
+
 # ==================== 配置模型定义 ====================
 
 class BasicConfig(BaseModel):
@@ -51,8 +59,8 @@ class BasicConfig(BaseModel):
     duckmail_base_url: str = Field(default="https://api.duckmail.sbs", description="DuckMail API地址")
     duckmail_api_key: str = Field(default="", description="DuckMail API key")
     duckmail_verify_ssl: bool = Field(default=True, description="DuckMail SSL校验")
-    temp_mail_provider: str = Field(default="moemail", description="临时邮箱提供商: moemail/duckmail/freemail/gptmail")
-    moemail_base_url: str = Field(default="https://moemail.nanohajimi.mom", description="Moemail API地址")
+    temp_mail_provider: str = Field(default="duckmail", description="临时邮箱提供商: duckmail/moemail/freemail/gptmail/cfmail/samplemail")
+    moemail_base_url: str = Field(default="https://moemail.app", description="Moemail API地址")
     moemail_api_key: str = Field(default="", description="Moemail API key")
     moemail_domain: str = Field(default="", description="Moemail 邮箱域名（可选，留空则随机选择）")
     freemail_base_url: str = Field(default="http://your-freemail-server.com", description="Freemail API地址")
@@ -64,11 +72,20 @@ class BasicConfig(BaseModel):
     gptmail_api_key: str = Field(default="gpt-test", description="GPTMail API key")
     gptmail_verify_ssl: bool = Field(default=True, description="GPTMail SSL校验")
     gptmail_domain: str = Field(default="", description="GPTMail 邮箱域名（可选，留空则随机选择）")
+    cfmail_base_url: str = Field(default="", description="Cloudflare Mail API地址")
+    cfmail_api_key: str = Field(default="", description="Cloudflare Mail 访问密码（x-custom-auth）")
+    cfmail_verify_ssl: bool = Field(default=True, description="Cloudflare Mail SSL校验")
+    cfmail_domain: str = Field(default="", description="Cloudflare Mail 邮箱域名（可选，留空随机）")
+    samplemail_base_url: str = Field(default="", description="Sample Mail Worker 地址")
+    samplemail_verify_ssl: bool = Field(default=True, description="Sample Mail SSL校验")
     browser_engine: str = Field(default="dp", description="浏览器引擎")
-    browser_headless: bool = Field(default=False, description="自动化浏览器无头模式")
-    refresh_window_hours: int = Field(default=1, ge=0, le=24, description="过期刷新窗口（小时）")
+    browser_mode: str = Field(default="normal", description="自动化浏览器模式：normal/silent/headless")
+    browser_headless: bool = Field(default=False, description="兼容字段：自动化浏览器无头模式")
+    auth_use_url_submit: bool = Field(default=True, description="登录时是否使用URL方式提交邮箱（true=URL提交，false=页面输入并点击邮箱登录）")
+    refresh_window_hours: int = Field(default=1, ge=0, le=168, description="过期刷新窗口（小时）")
     register_default_count: int = Field(default=1, ge=1, description="默认注册数量")
     register_domain: str = Field(default="", description="DuckMail 域名（推荐）")
+    image_expire_hours: int = Field(default=12, ge=-1, le=720, description="图片/视频过期时间（小时），-1为永不删除")
 
 
 class ImageGenerationConfig(BaseModel):
@@ -105,11 +122,52 @@ class RetryConfig(BaseModel):
     # 定时刷新配置
     scheduled_refresh_enabled: bool = Field(default=False, description="是否启用定时刷新任务")
     scheduled_refresh_cron: str = Field(default="08:00,20:00", description="刷新时间，如 '08:00,20:00' 或 '*/120'(每120分钟)")
-    refresh_batch_size: int = Field(default=5, ge=1, le=20, description="每批刷新账号数")
-    refresh_batch_interval_minutes: int = Field(default=30, ge=5, le=120, description="批次间等待时间(分钟)")
+    refresh_batch_size: int = Field(default=0, ge=0, le=1000, description="(已弃用) 批次刷新账号数")
+    refresh_batch_interval_minutes: int = Field(default=0, ge=0, le=1440, description="(已弃用) 批次间等待时间(分钟)")
     refresh_cooldown_hours: float = Field(default=12.0, ge=1, le=48, description="同一账号刷新冷却期(小时)")
+    verification_code_resend_count: int = Field(default=2, ge=0, le=5, description="验证码超时后的重发次数")
     # 向后兼容：旧配置可能只有这个字段，读取时自动转换为 */N cron 格式
     scheduled_refresh_interval_minutes: int = Field(default=0, ge=0, le=720, description="(旧字段，已废弃) 定时刷新检测间隔")
+
+    @validator("scheduled_refresh_cron")
+    def validate_scheduled_refresh_cron(cls, v):
+        raw = str(v or "").strip()
+        if not raw:
+            raise ValueError("scheduled_refresh_cron 不能为空")
+
+        # interval 模式：*/N（分钟）
+        if raw.startswith("*/"):
+            try:
+                minutes = int(raw[2:])
+            except ValueError as exc:
+                raise ValueError("scheduled_refresh_cron 间隔模式格式错误，应为 */分钟数") from exc
+            if minutes < 5:
+                raise ValueError("scheduled_refresh_cron 间隔模式最小 5 分钟")
+            return f"*/{minutes}"
+
+        # daily 模式：HH:MM,HH:MM
+        times = [item.strip() for item in raw.split(",") if item.strip()]
+        if not times:
+            raise ValueError("scheduled_refresh_cron 每日模式至少提供一个时间点")
+
+        normalized_times: List[str] = []
+        for item in times:
+            parts = item.split(":")
+            if len(parts) != 2:
+                raise ValueError(f"scheduled_refresh_cron 时间格式错误: {item}")
+            try:
+                hour = int(parts[0])
+                minute = int(parts[1])
+            except ValueError as exc:
+                raise ValueError(f"scheduled_refresh_cron 时间格式错误: {item}") from exc
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError(f"scheduled_refresh_cron 时间超出范围: {item}")
+            normalized = f"{hour:02d}:{minute:02d}"
+            if normalized not in normalized_times:
+                normalized_times.append(normalized)
+
+        normalized_times.sort()
+        return ",".join(normalized_times)
 
 class QuotaLimitsConfig(BaseModel):
     """每日配额上限配置（基于 Google 官方限额，用于主动配额计数）"""
@@ -128,6 +186,93 @@ class PublicDisplayConfig(BaseModel):
 class SessionConfig(BaseModel):
     """Session配置"""
     expire_hours: int = Field(default=24, ge=1, le=168, description="Session过期时间（小时）")
+
+
+class AutomationSelectorsConfig(BaseModel):
+    """自动化选择器配置（可热更新）"""
+    email_input_selectors: List[str] = Field(default_factory=lambda: [
+        "css:input#email-input",
+        "css:input[name='loginHint']",
+        "css:input[jsname='YPqjbf']",
+        "css:input[type='email']",
+        "css:input[autocomplete='username']",
+        "css:input[name='identifier']",
+        "css:input[name='email']",
+    ], description="邮箱输入框选择器")
+    email_submit_button_selectors: List[str] = Field(default_factory=lambda: [
+        "css:button#log-in-button",
+        "css:button[jsname='jXw9Fb']",
+        "css:button[aria-label='使用邮箱继续']",
+    ], description="邮箱提交按钮优先选择器")
+    email_submit_button_keywords: List[str] = Field(default_factory=lambda: [
+        "使用邮箱继续",
+        "使用邮箱登录",
+        "通过电子邮件登录",
+        "通过电子邮件发送验证码",
+        "通过电子邮件发送",
+        "sign in with email",
+        "use email",
+        "continue with email",
+        "next",
+        "继续",
+        "下一步",
+    ], description="邮箱提交按钮关键词")
+    generic_clickable_selectors: List[str] = Field(default_factory=lambda: [
+        "tag:button",
+        "tag:a",
+        "css:[role='button']",
+        "css:div[role='button']",
+    ], description="通用可点击元素选择器")
+    code_input_selectors: List[str] = Field(default_factory=lambda: [
+        "css:input[jsname='ovqh0b']",
+        "css:input[type='tel']",
+        "css:input[name='pinInput']",
+        "css:input[autocomplete='one-time-code']",
+    ], description="验证码输入框选择器")
+    send_code_button_keywords: List[str] = Field(default_factory=lambda: [
+        "通过电子邮件发送验证码",
+        "通过电子邮件发送",
+        "email",
+        "Email",
+        "Send code",
+        "Send verification",
+        "Verification code",
+    ], description="发送验证码按钮关键词")
+    resend_button_keywords: List[str] = Field(default_factory=lambda: [
+        "重新发送验证码",
+        "重新发送",
+        "重新获取",
+        "再次发送",
+        "获取新验证码",
+        "resend",
+        "send again",
+        "resend code",
+        "new code",
+        "try again",
+    ], description="重发按钮关键词")
+    status_message_selectors: List[str] = Field(default_factory=lambda: [
+        "css:.zyTWof-gIZMF",
+        "css:[role='alert']",
+        "css:aside",
+        "tag:body",
+    ], description="发送状态提示选择器")
+    send_status_success_keywords: List[str] = Field(default_factory=lambda: [
+        "验证码已发送",
+        "code sent",
+        "email sent",
+        "check your email",
+        "已发送",
+    ], description="发送成功关键词")
+    send_status_error_keywords: List[str] = Field(default_factory=lambda: [
+        "出了点问题",
+        "出了问题",
+        "something went wrong",
+        "error",
+        "failed",
+        "try again",
+        "稍后再试",
+        "选择其他登录方法",
+    ], description="发送失败关键词")
 
 
 class SecurityConfig(BaseModel):
@@ -149,6 +294,7 @@ class AppConfig(BaseModel):
     quota_limits: QuotaLimitsConfig = Field(default_factory=QuotaLimitsConfig)
     public_display: PublicDisplayConfig
     session: SessionConfig
+    automation_selectors: AutomationSelectorsConfig = Field(default_factory=AutomationSelectorsConfig)
 
 
 # ==================== 配置管理器 ====================
@@ -208,6 +354,10 @@ class ConfigManager:
             if isinstance(old_proxy_for_chat_bool, bool) and old_proxy_for_chat_bool:
                 proxy_for_chat = old_proxy
 
+        legacy_headless = _parse_bool(basic_data.get("browser_headless"), False)
+        default_browser_mode = "headless" if legacy_headless else "normal"
+        browser_mode = _normalize_browser_mode(basic_data.get("browser_mode"), default_browser_mode)
+
         basic_config = BasicConfig(
             api_key=basic_data.get("api_key") or "",
             base_url=basic_data.get("base_url") or "",
@@ -229,11 +379,20 @@ class ConfigManager:
             gptmail_api_key=str(basic_data.get("gptmail_api_key") or "").strip(),
             gptmail_verify_ssl=_parse_bool(basic_data.get("gptmail_verify_ssl"), True),
             gptmail_domain=str(basic_data.get("gptmail_domain") or "").strip(),
+            cfmail_base_url=str(basic_data.get("cfmail_base_url") or "").strip(),
+            cfmail_api_key=str(basic_data.get("cfmail_api_key") or "").strip(),
+            cfmail_verify_ssl=_parse_bool(basic_data.get("cfmail_verify_ssl"), True),
+            cfmail_domain=str(basic_data.get("cfmail_domain") or "").strip(),
+            samplemail_base_url=str(basic_data.get("samplemail_base_url") or "").strip(),
+            samplemail_verify_ssl=_parse_bool(basic_data.get("samplemail_verify_ssl"), True),
             browser_engine=basic_data.get("browser_engine") or "dp",
-            browser_headless=_parse_bool(basic_data.get("browser_headless"), False),
+            browser_mode=browser_mode,
+            browser_headless=browser_mode == "headless",
+            auth_use_url_submit=_parse_bool(basic_data.get("auth_use_url_submit"), True),
             refresh_window_hours=int(refresh_window_raw),
             register_default_count=int(register_default_raw),
             register_domain=str(register_domain_raw or "").strip(),
+            image_expire_hours=int(basic_data.get("image_expire_hours", 12)),
         )
 
         # 4. 加载其他配置（从数据库，带容错处理）
@@ -284,6 +443,14 @@ class ConfigManager:
             print(f"[WARN] Session配置加载失败，使用默认值: {e}")
             session_config = SessionConfig()
 
+        try:
+            automation_selectors_config = AutomationSelectorsConfig(
+                **yaml_data.get("automation_selectors", {})
+            )
+        except Exception as e:
+            print(f"[WARN] 自动化选择器配置加载失败，使用默认值: {e}")
+            automation_selectors_config = AutomationSelectorsConfig()
+
         # 5. 构建完整配置
         self._config = AppConfig(
             security=security_config,
@@ -293,7 +460,8 @@ class ConfigManager:
             retry=retry_config,
             quota_limits=quota_limits_config,
             public_display=public_display_config,
-            session=session_config
+            session=session_config,
+            automation_selectors=automation_selectors_config,
         )
 
     def _load_yaml(self) -> dict:
@@ -360,6 +528,9 @@ class ConfigManager:
             session_config = SessionConfig(
                 **data.get("session", {})
             )
+            automation_selectors_config = AutomationSelectorsConfig(
+                **data.get("automation_selectors", {})
+            )
 
             # 验证通过，构建完整配置
             test_config = AppConfig(
@@ -370,7 +541,8 @@ class ConfigManager:
                 retry=retry_config,
                 quota_limits=quota_limits_config,
                 public_display=public_display_config,
-                session=session_config
+                session=session_config,
+                automation_selectors=automation_selectors_config,
             )
         except Exception as e:
             # 验证失败，不保存到数据库
@@ -540,5 +712,9 @@ class _ConfigProxy:
     @property
     def session(self):
         return config_manager.config.session
+
+    @property
+    def automation_selectors(self):
+        return config_manager.config.automation_selectors
 
 config = _ConfigProxy()

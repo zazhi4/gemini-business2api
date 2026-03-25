@@ -56,18 +56,11 @@ class RegisterService(BaseTaskService[RegisterTask]):
             log_prefix="REGISTER",
         )
 
-    def _get_running_task(self) -> Optional[RegisterTask]:
-        """获取正在运行或等待中的任务"""
-        for task in self._tasks.values():
-            if isinstance(task, RegisterTask) and task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
-                return task
-        return None
-
     async def start_register(self, count: Optional[int] = None, domain: Optional[str] = None, mail_provider: Optional[str] = None) -> RegisterTask:
         """
         启动注册任务 - 统一任务管理
-        - 如果有正在运行的任务，将新数量添加到该任务
-        - 如果没有正在运行的任务，创建新任务
+        - 每次请求创建独立任务
+        - 所有任务统一进入串行队列执行
         """
         async with self._lock:
             if os.environ.get("ACCOUNTS_CONFIG"):
@@ -89,38 +82,16 @@ class RegisterService(BaseTaskService[RegisterTask]):
             register_count = count or config.basic.register_default_count
             register_count = max(1, int(register_count))
 
-            # 检查是否有正在运行的任务
-            running_task = self._get_running_task()
-
-            if running_task:
-                # 将新数量添加到现有任务
-                running_task.count += register_count
-                self._append_log(
-                    running_task,
-                    "info",
-                    f"📝 添加 {register_count} 个账户到现有任务 (总计: {running_task.count})"
-                )
-                return running_task
-
-            # 创建新任务
+            # 每次都创建新任务，避免运行中动态修改任务目标导致执行数量不准确
             task = RegisterTask(id=str(uuid.uuid4()), count=register_count, domain=domain_value, mail_provider=mail_provider_value)
             self._tasks[task.id] = task
-            self._append_log(task, "info", f"📝 创建注册任务 (数量: {register_count}, 域名: {domain_value or 'default'}, 提供商: {mail_provider_value})")
-
-            # 直接启动任务
-            self._current_task_id = task.id
-            asyncio.create_task(self._run_task_directly(task))
+            self._append_log(
+                task,
+                "info",
+                f"📝 创建注册任务并入队 (数量: {register_count}, 域名: {domain_value or 'default'}, 提供商: {mail_provider_value})"
+            )
+            await self._enqueue_task(task)
             return task
-
-    async def _run_task_directly(self, task: RegisterTask) -> None:
-        """直接执行任务"""
-        try:
-            await self._run_one_task(task)
-        finally:
-            # 任务完成后清理
-            async with self._lock:
-                if self._current_task_id == task.id:
-                    self._current_task_id = None
 
     def _execute_task(self, task: RegisterTask):
         return self._run_register_async(task, task.domain, task.mail_provider)
@@ -152,11 +123,15 @@ class RegisterService(BaseTaskService[RegisterTask]):
             if result.get("success"):
                 task.success_count += 1
                 email = result.get('email', '未知')
+                self._append_log(task, "info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 self._append_log(task, "info", f"✅ 注册成功: {email}")
+                self._append_log(task, "info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             else:
                 task.fail_count += 1
                 error = result.get('error', '未知错误')
+                self._append_log(task, "error", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 self._append_log(task, "error", f"❌ 注册失败: {error}")
+                self._append_log(task, "error", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
             # 账号之间等待 10 秒，避免资源争抢和风控
             if idx < task.count - 1 and not task.cancel_requested:
@@ -168,7 +143,6 @@ class RegisterService(BaseTaskService[RegisterTask]):
         else:
             task.status = TaskStatus.SUCCESS if task.fail_count == 0 else TaskStatus.FAILED
         task.finished_at = time.time()
-        self._current_task_id = None
         self._append_log(task, "info", f"🏁 注册任务完成 (成功: {task.success_count}, 失败: {task.fail_count}, 总计: {task.count})")
 
     def _register_one(self, domain: Optional[str], mail_provider: Optional[str], task: RegisterTask) -> dict:
@@ -202,15 +176,20 @@ class RegisterService(BaseTaskService[RegisterTask]):
 
         log_cb("info", f"✅ 邮箱注册成功: {client.email}")
 
+        browser_mode = (config.basic.browser_mode or "normal").strip().lower()
         headless = config.basic.browser_headless
         proxy_for_auth, _ = parse_proxy_setting(config.basic.proxy_for_auth)
 
-        log_cb("info", f"🌐 步骤 2/3: 启动浏览器 (无头模式={headless})...")
+        log_cb("info", f"🌐 步骤 2/3: 启动浏览器 (模式={browser_mode}, 无头={headless})...")
+        if proxy_for_auth:
+            log_cb("info", f"🌐 浏览器代理: {proxy_for_auth}")
+        else:
+            log_cb("info", "🌐 浏览器代理: 未启用")
 
         automation = GeminiAutomation(
             user_agent=self.user_agent,
             proxy=proxy_for_auth,
-            headless=headless,
+            browser_mode=browser_mode,
             log_callback=log_cb,
         )
         # 允许外部取消时立刻关闭浏览器
@@ -247,6 +226,18 @@ class RegisterService(BaseTaskService[RegisterTask]):
             config_data["mail_api_key"] = config.basic.gptmail_api_key
             config_data["mail_verify_ssl"] = config.basic.gptmail_verify_ssl
             config_data["mail_domain"] = config.basic.gptmail_domain
+        elif temp_mail_provider == "cfmail":
+            config_data["mail_password"] = getattr(client, "jwt_token", "") or getattr(client, "password", "")
+            config_data["mail_base_url"] = config.basic.cfmail_base_url
+            config_data["mail_api_key"] = config.basic.cfmail_api_key
+            config_data["mail_verify_ssl"] = config.basic.cfmail_verify_ssl
+            config_data["mail_domain"] = config.basic.cfmail_domain
+        elif temp_mail_provider == "samplemail":
+            config_data["mail_password"] = ""
+            config_data["mail_base_url"] = config.basic.samplemail_base_url
+            config_data["mail_api_key"] = ""
+            config_data["mail_verify_ssl"] = config.basic.samplemail_verify_ssl
+            config_data["mail_domain"] = ""
         elif temp_mail_provider == "moemail":
             config_data["mail_password"] = getattr(client, "email_id", "") or getattr(client, "password", "")
             config_data["mail_base_url"] = config.basic.moemail_base_url
